@@ -6,8 +6,27 @@ export class LlmProviderService {
   private readonly openRouterEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
   /**
+   * Safely extracts and parses JSON even if wrapped in markdown code blocks like ```json ... ```
+   */
+  private cleanAndParseJson<T>(rawContent: string): T {
+    let cleaned = rawContent.trim();
+
+    // Strip leading and trailing markdown code block tags if present
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    // Extract the substring between the first '{' and the last '}'
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
+
+    return JSON.parse(cleaned) as T;
+  }
+
+  /**
    * Dispatch Tier-1 Specialist LLM Call via OpenRouter
-   * Uses fast models (e.g. Google Gemini 2.0 Flash / Llama 3.3 70B via OpenRouter)
+   * Uses fast models (Meta Llama 3.3 70B / Gemini Flash / Qwen 2.5 via OpenRouter)
    */
   async callFastSpecialist<T>(systemPrompt: string, userPrompt: string, specialistName: string = 'Specialist'): Promise<T> {
     const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -18,11 +37,14 @@ export class LlmProviderService {
       throw new BadGatewayException(msg);
     }
 
-    // Default fast models via OpenRouter
+    // Reliable model list with fallbacks for OpenRouter
     const specialistModels = [
-      process.env.OPENROUTER_SPECIALIST_MODEL || 'google/gemini-2.0-flash-001',
-      'google/gemini-flash-1.5',
-      'meta-llama/llama-3.3-70b-instruct',
+      process.env.OPENROUTER_SPECIALIST_MODEL || 'meta-llama/llama-3.3-70b-instruct',
+      'google/gemini-2.0-flash-exp:free',
+      'google/gemini-2.0-flash-001',
+      'google/gemini-flash-1.5-8b',
+      'qwen/qwen-2.5-72b-instruct',
+      'deepseek/deepseek-chat',
     ];
 
     const errors: string[] = [];
@@ -40,21 +62,30 @@ export class LlmProviderService {
           body: JSON.stringify({
             model,
             messages: [
-              { role: 'system', content: systemPrompt },
+              {
+                role: 'system',
+                content: `${systemPrompt}\n\nIMPORTANT: Return ONLY valid raw JSON without any markdown formatting, backticks, or explanation.`,
+              },
               { role: 'user', content: userPrompt },
             ],
             response_format: { type: 'json_object' },
             temperature: 0.2,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(16000),
         });
 
         if (res.ok) {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) {
-            this.logger.log(`[${specialistName}] Successfully generated analysis using OpenRouter (${model})`);
-            return JSON.parse(content) as T;
+            try {
+              const parsed = this.cleanAndParseJson<T>(content);
+              this.logger.log(`[${specialistName}] Successfully generated analysis using OpenRouter (${model})`);
+              return parsed;
+            } catch (parseErr: any) {
+              errors.push(`OpenRouter (${model}) JSON parse error: ${parseErr.message} on output: ${content.slice(0, 100)}...`);
+              continue;
+            }
           }
           errors.push(`OpenRouter (${model}) returned empty message content`);
         } else {
@@ -74,7 +105,7 @@ export class LlmProviderService {
 
   /**
    * Dispatch Tier-2 Master Oracle LLM Call via OpenRouter
-   * Uses top-tier reasoning models (Gemini 2.0 Flash / Gemini 1.5 Pro via OpenRouter) for cross-domain forecasting
+   * Uses top-tier reasoning models (Gemini / Llama 3.3 / DeepSeek via OpenRouter) for cross-domain forecasting
    */
   async callMasterOracle<T>(systemPrompt: string, userPrompt: string): Promise<T> {
     const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -85,12 +116,14 @@ export class LlmProviderService {
       throw new BadGatewayException(msg);
     }
 
-    // Default oracle models via OpenRouter
+    // Reliable oracle model list with fallbacks for OpenRouter
     const oracleModels = [
-      process.env.OPENROUTER_ORACLE_MODEL || 'google/gemini-2.0-flash-001',
+      process.env.OPENROUTER_ORACLE_MODEL || 'meta-llama/llama-3.3-70b-instruct',
+      'google/gemini-2.0-flash-exp:free',
+      'google/gemini-2.0-flash-001',
       'google/gemini-pro-1.5',
-      'google/gemini-flash-1.5',
-      'meta-llama/llama-3.3-70b-instruct',
+      'deepseek/deepseek-chat',
+      'qwen/qwen-2.5-72b-instruct',
     ];
 
     const errors: string[] = [];
@@ -108,21 +141,30 @@ export class LlmProviderService {
           body: JSON.stringify({
             model,
             messages: [
-              { role: 'system', content: systemPrompt },
+              {
+                role: 'system',
+                content: `${systemPrompt}\n\nIMPORTANT: Return ONLY valid raw JSON without any markdown formatting, backticks, or explanation.`,
+              },
               { role: 'user', content: userPrompt },
             ],
             response_format: { type: 'json_object' },
             temperature: 0.35,
           }),
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(22000),
         });
 
         if (res.ok) {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) {
-            this.logger.log(`Master Oracle synthesis successfully generated using OpenRouter (${model})`);
-            return JSON.parse(content) as T;
+            try {
+              const parsed = this.cleanAndParseJson<T>(content);
+              this.logger.log(`Master Oracle synthesis successfully generated using OpenRouter (${model})`);
+              return parsed;
+            } catch (parseErr: any) {
+              errors.push(`OpenRouter (${model}) JSON parse error: ${parseErr.message} on output: ${content.slice(0, 100)}...`);
+              continue;
+            }
           }
           errors.push(`OpenRouter (${model}) returned empty message content`);
         } else {
