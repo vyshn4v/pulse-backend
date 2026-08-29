@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "./client-v11"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     Int                  @id @default(autoincrement())
+  googleId               String               @unique
+  email                  String               @unique
+  name                   String               @default("")
+  avatarUrl              String               @default("")
+  role                   String               @default("user")
+  leetcodeUsername       String?              @default("")
+  mediumUsername         String?              @default("")
+  // LinkedIn OAuth & Auto-Publishing tokens
+  linkedinAccessToken    String?
+  linkedinRefreshToken   String?
+  linkedinMemberUrn      String?
+  linkedinTokenExpiresAt DateTime?
+  linkedinAccountName    String?              @default("")
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  meProfile              MeProfile?
+  activityLogs           ActivityLog[]
+  jobApplications        JobApplication[]
+  hrDetails              HRDetails[]
+  leetcodeSubmissions    LeetCodeSubmission[]
+  linkedInPosts          LinkedInPost[]
+  mediumPosts            MediumPost[]
+  projects               Project[]
+  dailySyntheses         DailySynthesis[]
+  brainMemories          BrainMemory[]
+  aiQueryLogs            AiQueryLog[]
+  appUsageLogs           AppUsageLog[]
+  screenTimeSummaries    DailyScreenTimeSummary[]
+}
+
+model MeProfile {
+  id                 Int      @id @default(autoincrement())
+  userId             Int      @unique
+  whoAmI             String?  @default("")
+  goals              String?  @default("")
+  brainBehaviorPrefs Json?    @default("{}")
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id          Int       @id @default(autoincrement())
+  date        DateTime  @default(now())
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  category    String    // work, personal, health, learning, finance, other
+  title       String    @default("")
+  description String    @default("")
+  status      String    @default("pending") // pending, in-progress, hold, rejected, done
+  metadata    Json      @default("{}")
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, startDate])
+  @@index([category])
+}
+
+model JobApplication {
+  id          Int        @id @default(autoincrement())
+  company     String
+  role        String
+  status      String     @default("applied") // applied, interview, offer, rejected
+  appliedAt   DateTime   @default(now())
+  source      String     @default("Other")   // Wellfound, Cutshort, Instahyre, YC India, Naukri, LinkedIn, Referral, Other
+  jobLink     String?    @default("")
+  salaryRange String?    @default("")
+  notes       String?    @default("")
+  userId      Int
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hrDetailsId Int?
+  hrDetails   HRDetails? @relation(fields: [hrDetailsId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, appliedAt])
+}
+
+model HRDetails {
+  id              Int              @id @default(autoincrement())
+  name            String           @default("")
+  email           String           @unique
+  phone           String?          @default("")
+  company         String?          @default("")
+  notes           String?          @default("")
+  userId          Int
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobApplications JobApplication[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([userId, email])
+}
+
+model LeetCodeSubmission {
+  id         Int      @id @default(autoincrement())
+  title      String
+  titleSlug  String
+  difficulty String   @default("Medium") // Easy, Medium, Hard
+  status     String   @default("Accepted")
+  language   String   @default("")
+  timestamp  DateTime @default(now())
+  notes      String?  @default("")
+  topics     String[] @default([])
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, titleSlug])
+  @@index([userId, difficulty])
+  @@index([userId, timestamp])
+}
+
+model LinkedInPost {
+  id                  Int       @id @default(autoincrement())
+  topic               String    @default("")
+  content             String    // Post body
+  status              String    @default("draft") // draft, scheduled, published, review, archived
+  scheduledFor        DateTime?
+  publishedAt         DateTime?
+  firstComment        String?   @default("") // Prepared first comment / link
+  commentScheduledFor DateTime?              // Time after scheduledFor
+  commentPosted       Boolean   @default(false)
+  commentPublishedAt  DateTime?              // Timestamp when comment went live
+  retryCount          Int       @default(0)   // Number of publish attempts (max 3)
+  commentRetryCount   Int       @default(0)   // Number of comment publish attempts (max 3)
+  linkedinUrn         String?   @default("") // urn:li:share:xxx or urn:li:ugcPost:xxx
+  failureReason       String?   @default("") // Error message if moved to review queue
+  tags                String[]  @default([])
+  mediaUrls           String[]  @default([])
+  impressions         Int       @default(0)
+  reactions           Int       @default(0)
+  comments            Int       @default(0)
+  reposts             Int       @default(0)
+  postUrl             String?   @default("")
+  notes               String?   @default("")
+  userId              Int
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, scheduledFor])
+  @@index([userId, publishedAt])
+}
+
+model DailySynthesis {
+  id               Int       @id @default(autoincrement())
+  date             DateTime  @default(now())
+  summary          String    // Executive overview of accomplishments and trajectory
+  highlights       String[]  @default([])
+  actionItems      String[]  @default([])
+  risksOrBlockers  String[]  @default([])
+  cognitiveScore   Int       @default(0) // 0-100 score computed by synthesis LLM
+  rawLLMResponse   String?   @default("")
+  metricsSnapshot  Json      @default("{}")
+  emailDelivered   Boolean   @default(false)
+  emailDeliveredAt DateTime?
+  userId           Int
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, createdAt])
+}
+
+model BrainMemory {
+  id         Int      @id @default(autoincrement())
+  sourceType String   // activity, job, leetcode, linkedin, profile, reflection
+  sourceId   Int?
+  title      String   @default("")
+  content    String   // Text content indexed for vector search
+  vectorId   String?  // Pinecone vector ID
+  metadata   Json     @default("{}")
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, sourceType])
+  @@index([userId, vectorId])
+}
+
+model AiQueryLog {
+  id        Int      @id @default(autoincrement())
+  query     String
+  answer    String
+  sources   Json     @default("[]") // [{ type: 'activity', id: 1, title: '...' }]
+  latencyMs Int      @default(0)
+  modelUsed String   @default("default")
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AppUsageLog {
+  id              Int      @id @default(autoincrement())
+  appName         String   // VS Code, iTerm2, Google Chrome, Postman, Figma, Slack, Spotify
+  category        String   @default("other") // coding, terminal, research, communication, design, entertainment, other
+  windowTitle     String?  @default("")
+  durationSeconds Int      @default(0)
+  date            DateTime @default(now())
+  isProductive    Boolean  @default(true)
+  metadata        Json     @default("{}")
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, category])
+  @@index([userId, isProductive])
+}
+
+model DailyScreenTimeSummary {
+  id                 Int       @id @default(autoincrement())
+  date               DateTime  @default(now())
+  totalSeconds       Int       @default(0)
+  productiveSeconds  Int       @default(0)
+  distractingSeconds Int       @default(0)
+  focusScore         Float     @default(0.0) // 0 - 100%
+  deepWorkBlocks     Int       @default(0)
+  contextSwitches    Int       @default(0)
+  categoryBreakdown  Json      @default("{}") // { coding: 12000, terminal: 4000 }
+  topApps            Json      @default("[]") // [ { appName: "VS Code", seconds: 12000, percentage: 65 } ]
+  digestSent         Boolean   @default(false)
+  digestSentAt       DateTime?
+  userId             Int
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model MediumPost {
+  id                 Int       @id @default(autoincrement())
+  title              String
+  url                String    // Full Medium article URL (e.g. https://medium.com/@...)
+  subtitle           String?   @default("") // Excerpt / subtitle / description
+  coverImage         String?   @default("") // Cover image / banner URL
+  tags               String[]  @default([])
+  publishedAt        DateTime  @default(now())
+  readingTimeMinutes Int?      @default(5)
+  claps              Int?      @default(0)
+  responsesCount     Int?      @default(0)
+  canonicalUrl       String?   @default("")
+  isHidden           Boolean   @default(false) // Toggle to hide/unhide from public portfolio API
+  isFeatured         Boolean   @default(false) // Highlight flag for portfolio showcase
+  userId             Int
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId, isHidden])
+  @@index([userId, publishedAt])
+  @@index([isHidden, publishedAt])
+}
+
+model Project {
+  id              Int       @id @default(autoincrement())
+  title           String
+  description     String    @default("")
+  repoUrl         String?   @default("")    // GitHub/GitLab repo link
+  liveUrl         String?   @default("")    // Deployed URL
+  coverImage      String?   @default("")    // Project screenshot/banner
+  techStack       String[]  @default([])    // ["NestJS", "React", "PostgreSQL"]
+  category        String    @default("personal") // personal, freelance, open-source, work, hackathon
+  status          String    @default("active")   // active, completed, archived, paused
+  startDate       DateTime  @default(now())
+  endDate         DateTime?
+  isHidden        Boolean   @default(false)   // Toggle to hide/unhide from public portfolio API
+  isFeatured      Boolean   @default(false)   // Highlight flag for portfolio showcase
+  highlights      String[]  @default([])      // Key achievements / bullet points
+  metrics         Json      @default("{}")    // { stars: 12, forks: 3, users: 500 }
+  userId          Int
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, isHidden])
+  @@index([isHidden, startDate])
+}
+
+
