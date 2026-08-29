@@ -3,7 +3,21 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { PineconeService } from '../pinecone/pinecone.service';
+import { AppUsageService } from '../app-usage/app-usage.service';
 import { DailySynthesisResponseDto, BrainStatsDto } from './brain.dto';
+import { ActivityFocusSpecialist } from './specialists/activity-focus.specialist';
+import { LeetCodeDsaSpecialist } from './specialists/leetcode-dsa.specialist';
+import { CareerPipelineSpecialist } from './specialists/career-pipeline.specialist';
+import { LinkedInBrandSpecialist } from './specialists/linkedin-brand.specialist';
+import { MasterOracleSynthesizer } from './synthesizers/master-oracle.synthesizer';
+import {
+  AggregatedSpecialistReports,
+  FocusSpecialistReport,
+  DsaSpecialistReport,
+  CareerSpecialistReport,
+  BrandSpecialistReport,
+  MasterSynthesisReport,
+} from './types/specialist.types';
 
 @Injectable()
 export class BrainService implements OnModuleInit {
@@ -13,10 +27,16 @@ export class BrainService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly pineconeService: PineconeService,
+    private readonly appUsageService: AppUsageService,
+    private readonly focusSpecialist: ActivityFocusSpecialist,
+    private readonly dsaSpecialist: LeetCodeDsaSpecialist,
+    private readonly careerSpecialist: CareerPipelineSpecialist,
+    private readonly brandSpecialist: LinkedInBrandSpecialist,
+    private readonly masterOracle: MasterOracleSynthesizer,
   ) {}
 
   onModuleInit() {
-    this.logger.log('Autonomous Brain Intelligence Service active. Nightly synthesis scheduled for 5:00 AM IST.');
+    this.logger.log('Multi-Agent Hierarchical Brain Intelligence active. Nightly synthesis scheduled for 5:00 AM IST.');
   }
 
   // ---------------------------------------------------------------------------
@@ -28,7 +48,7 @@ export class BrainService implements OnModuleInit {
     timeZone: 'Asia/Kolkata',
   })
   async handleNightlySynthesisCron() {
-    this.logger.log('Executing 5:00 AM Autonomous Brain Synthesis cycle across active users...');
+    this.logger.log('Executing 5:00 AM Multi-Agent Cognitive Synthesis cycle across active users...');
     const users = await this.prisma.user.findMany({
       select: { id: true, email: true },
     });
@@ -43,18 +63,18 @@ export class BrainService implements OnModuleInit {
   }
 
   // ---------------------------------------------------------------------------
-  // Core Synthesis Generator
+  // Core Multi-Agent Synthesis Generator
   // ---------------------------------------------------------------------------
 
   async generateDailySynthesis(userId: number, sendEmail: boolean = false): Promise<DailySynthesisResponseDto> {
-    this.logger.log(`Starting Cognitive Synthesis generation for user #${userId}...`);
+    this.logger.log(`Starting Multi-Agent Cognitive Synthesis generation for user #${userId}...`);
 
     const now = new Date();
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    // 1. Fetch telemetry records in parallel
-    const [user, meProfile, recentActivities, weekActivities, recentJobs, solvedProblems, recentPosts] =
+    // 1. Fetch raw telemetry records in parallel across all services
+    const [user, meProfile, recentActivities, weekActivities, recentJobs, solvedProblems, recentPosts, screenTimeSummary] =
       await Promise.all([
         this.prisma.user.findUnique({ where: { id: userId } }),
         this.prisma.meProfile.findUnique({ where: { id: userId } }),
@@ -77,95 +97,143 @@ export class BrainService implements OnModuleInit {
           where: { userId },
           orderBy: { createdAt: 'desc' },
         }),
+        this.appUsageService.getTodaySummary(userId).catch(() => null),
       ]);
 
     if (!user) {
       throw new NotFoundException(`User #${userId} not found`);
     }
 
-    // 2. Compute Metric Snapshots
-    const activeJobs = recentJobs.filter((j) => ['applied', 'interview', 'offer'].includes(j.status));
-    const interviews = recentJobs.filter((j) => j.status === 'interview');
-    const recentSolved = solvedProblems.filter((p) => new Date(p.timestamp) >= sevenDaysAgo);
-    const publishedPosts = recentPosts.filter((p) => p.status === 'published');
-    const scheduledPosts = recentPosts.filter((p) => p.status === 'scheduled');
-    const totalImpressions = publishedPosts.reduce((acc, p) => acc + (p.impressions || 0), 0);
+    const persona = meProfile?.whoAmI || 'Senior Software Engineer / Tech Lead';
+    const goals = meProfile?.goals || 'Mastering Distributed Systems, DSA, and Top-Tier Career Advancement';
+    const focusDomains: string[] = meProfile?.brainBehaviorPrefs
+      ? (meProfile.brainBehaviorPrefs as any).focusDomains || []
+      : ['Backend Systems', 'Distributed Systems', 'Cloud'];
 
+    const recentSolved = solvedProblems.filter((p) => new Date(p.timestamp) >= sevenDaysAgo);
+
+    // 2. Execute Tier-1 Domain Specialists in Parallel (with resilient fallback isolation)
+    this.logger.log('Dispatching Tier-1 Domain Specialist Agents in parallel...');
+    const [focusSettled, dsaSettled, careerSettled, brandSettled] = await Promise.allSettled([
+      this.focusSpecialist.analyze(
+        persona,
+        recentActivities,
+        weekActivities,
+        screenTimeSummary ? { totalSeconds: screenTimeSummary.totalSeconds, topApps: screenTimeSummary.topApps } : undefined,
+      ),
+      this.dsaSpecialist.analyze(persona, solvedProblems, recentSolved),
+      this.careerSpecialist.analyze(persona, recentJobs),
+      this.brandSpecialist.analyze(persona, recentPosts),
+    ]);
+
+    const focusReport: FocusSpecialistReport =
+      focusSettled.status === 'fulfilled'
+        ? focusSettled.value
+        : {
+            domain: 'focus_and_productivity',
+            velocityScore: 70,
+            flowStateRating: 'Optimal',
+            completedTasksCount: recentActivities.filter((a) => a.status === 'done').length,
+            blockedTasksCount: 0,
+            topDistractionsOrFrictions: [],
+            keyWins: recentActivities.slice(0, 3).map((a) => a.title),
+            domainRecommendation: 'Continue high execution focus.',
+          };
+
+    const dsaReport: DsaSpecialistReport =
+      dsaSettled.status === 'fulfilled'
+        ? dsaSettled.value
+        : {
+            domain: 'dsa_and_algorithms',
+            masteryScore: 75,
+            weeklySolvedCount: recentSolved.length,
+            totalSolvedCount: solvedProblems.length,
+            strongTopics: ['Arrays', 'Strings'],
+            blindspotsOrNeglectedTopics: ['Graph', 'Tree'],
+            interviewReadinessLevel: 'Senior',
+            suggestedProblemToday: {
+              title: 'Target Topic Problem',
+              topic: 'Graph / Tree',
+              difficulty: 'Medium',
+              reason: 'Balancing algorithmic distribution.',
+            },
+            domainRecommendation: 'Solve 1 Medium problem today.',
+          };
+
+    const careerReport: CareerSpecialistReport =
+      careerSettled.status === 'fulfilled'
+        ? careerSettled.value
+        : {
+            domain: 'career_and_pipeline',
+            pipelineHealthScore: 75,
+            activeApplicationsCount: recentJobs.filter((j) => ['applied', 'interview'].includes(j.status)).length,
+            interviewStageCount: recentJobs.filter((j) => j.status === 'interview').length,
+            stalledApplicationsCount: 0,
+            urgentFollowUps: [],
+            interviewPrepFocus: 'Review system design architectures and technical concepts.',
+            domainRecommendation: 'Maintain steady application outreach.',
+          };
+
+    const brandReport: BrandSpecialistReport =
+      brandSettled.status === 'fulfilled'
+        ? brandSettled.value
+        : {
+            domain: 'brand_and_thought_leadership',
+            brandMomentumScore: 70,
+            publishedCount: recentPosts.filter((p) => p.status === 'published').length,
+            scheduledQueueCount: recentPosts.filter((p) => p.status === 'scheduled').length,
+            totalImpressions: recentPosts.reduce((acc, p) => acc + (p.impressions || 0), 0),
+            topPerformingTopics: ['#SoftwareEngineering'],
+            nextPostDraftPrompt: 'Share insights on distributed systems design.',
+            domainRecommendation: 'Keep active presence on LinkedIn.',
+          };
+
+    const aggregatedReports: AggregatedSpecialistReports = {
+      focus: focusReport,
+      dsa: dsaReport,
+      career: careerReport,
+      brand: brandReport,
+    };
+
+    // 3. Dispatch Tier-2 Master Oracle Synthesizer (Gemini / High-Reasoning LLM)
+    this.logger.log('Dispatching Tier-2 Master Oracle Synthesizer for cross-domain forecasting...');
+    const masterResult: MasterSynthesisReport = await this.masterOracle.synthesize(
+      persona,
+      goals,
+      focusDomains,
+      aggregatedReports,
+    );
+
+    // 4. Assemble Rich Metrics Snapshot
     const metricsSnapshot = {
       activities24h: recentActivities.length,
       activities7d: weekActivities.length,
       dsaSolvedTotal: solvedProblems.length,
       dsaSolved7d: recentSolved.length,
-      activeJobsCount: activeJobs.length,
-      interviewsCount: interviews.length,
-      publishedPostsCount: publishedPosts.length,
-      scheduledPostsCount: scheduledPosts.length,
-      totalImpressions,
-      focusDomains: meProfile?.brainBehaviorPrefs ? (meProfile.brainBehaviorPrefs as any).focusDomains || [] : [],
+      activeJobsCount: recentJobs.filter((j) => ['applied', 'interview', 'offer'].includes(j.status)).length,
+      interviewsCount: recentJobs.filter((j) => j.status === 'interview').length,
+      publishedPostsCount: recentPosts.filter((p) => p.status === 'published').length,
+      scheduledPostsCount: recentPosts.filter((p) => p.status === 'scheduled').length,
+      totalImpressions: recentPosts.reduce((acc, p) => acc + (p.impressions || 0), 0),
+      screenTimeSeconds: screenTimeSummary ? screenTimeSummary.totalSeconds : 0,
+      specialistReports: aggregatedReports,
+      crossDomainCorrelations: masterResult.crossDomainCorrelations,
+      futuristicForecast: masterResult.futuristicForecast,
+      specialistBreakdown: masterResult.specialistBreakdown,
     };
-
-    // 3. Assemble LLM Prompt Context
-    const systemPrompt = `You are the PULSE Autonomous Cognitive Synthesis Engine.
-Analyze the engineer's telemetry, accomplishments, and goals.
-Provide an executive synthesis with:
-1. Executive Summary (2-3 concise paragraphs evaluating momentum and trajectory)
-2. Top Accomplishments & Wins (3-5 bullet points)
-3. Action Plan & Focus Roadmap for Today (3-5 high-priority actions)
-4. Risks, Stalled Items, or Attention Warnings (1-3 items)
-5. A Cognitive Momentum Score between 0 and 100 based on output.
-
-Return your response strictly in structured JSON format with this exact schema:
-{
-  "summary": "...",
-  "highlights": ["...", "..."],
-  "actionItems": ["...", "..."],
-  "risksOrBlockers": ["...", "..."],
-  "cognitiveScore": 88
-}`;
-
-    const userPrompt = `Engineer Profile:
-- Persona: ${meProfile?.whoAmI || 'Senior Software Engineer'}
-- Core Goals: ${meProfile?.goals || 'Mastering Distributed Systems, DSA, and Career Advancement'}
-- Focus Domains: ${(metricsSnapshot.focusDomains as string[]).join(', ') || 'Backend Systems, Distributed Systems, Cloud'}
-
-Past 24-Hour Activities (${recentActivities.length} logged):
-${
-  recentActivities.map((a) => `- [${a.category.toUpperCase()}] ${a.title}: ${a.description} (Status: ${a.status})`).join('\n') ||
-  'No activity log entries recorded in the last 24 hours.'
-}
-
-Technical Problem Solving (LeetCode):
-- Total Solved: ${solvedProblems.length} (${recentSolved.length} solved this week)
-- Recent problems: ${solvedProblems.slice(0, 5).map((p) => `${p.title} (${p.difficulty})`).join(', ') || 'None'}
-
-Career Pipeline:
-- Active Applications: ${activeJobs.length} active (${interviews.length} in interview phase)
-- Recent Companies: ${recentJobs.slice(0, 4).map((j) => `${j.company} (${j.role}) - ${j.status}`).join(', ') || 'None'}
-
-Thought Leadership (LinkedIn):
-- Content Published: ${publishedPosts.length} posts (${totalImpressions} total views)
-- Upcoming in Queue: ${scheduledPosts.length} posts scheduled
-`;
-
-    // 4. Call Synthesis LLM (with multi-provider fallback)
-    let synthesisResult = await this.callLLM(systemPrompt, userPrompt);
-
-    if (!synthesisResult) {
-      synthesisResult = this.generateDeterministicSynthesis(meProfile, metricsSnapshot, recentActivities, recentJobs, solvedProblems, recentPosts);
-    }
 
     // 5. Persist Synthesis to PostgreSQL
     const saved = await this.prisma.dailySynthesis.create({
       data: {
         userId,
         date: now,
-        summary: synthesisResult.summary,
-        highlights: synthesisResult.highlights,
-        actionItems: synthesisResult.actionItems,
-        risksOrBlockers: synthesisResult.risksOrBlockers,
-        cognitiveScore: synthesisResult.cognitiveScore,
-        rawLLMResponse: JSON.stringify(synthesisResult, null, 2),
-        metricsSnapshot,
+        summary: masterResult.summary,
+        highlights: masterResult.highlights,
+        actionItems: masterResult.actionItems,
+        risksOrBlockers: masterResult.risksOrBlockers,
+        cognitiveScore: masterResult.cognitiveScore,
+        rawLLMResponse: JSON.stringify(masterResult, null, 2),
+        metricsSnapshot: metricsSnapshot as any,
         emailDelivered: false,
       },
     });
@@ -176,18 +244,22 @@ Thought Leadership (LinkedIn):
         userId,
         sourceType: 'synthesis',
         sourceId: saved.id,
-        title: `Daily Synthesis · ${now.toLocaleDateString()}`,
-        content: `${synthesisResult.summary}\n\nKey Wins:\n${synthesisResult.highlights.join('\n')}\n\nPriorities:\n${synthesisResult.actionItems.join('\n')}`,
-        metadata: { score: synthesisResult.cognitiveScore, date: now.toISOString() },
+        title: `Multi-Agent Synthesis · ${now.toLocaleDateString()}`,
+        content: `${masterResult.summary}\n\nKey Highlights:\n${masterResult.highlights.join('\n')}\n\n30-Day Trajectory:\n${masterResult.futuristicForecast?.thirtyDayTrajectory || 'N/A'}\n\nPriorities:\n${masterResult.actionItems.join('\n')}`,
+        metadata: {
+          score: masterResult.cognitiveScore,
+          date: now.toISOString(),
+          specialistScores: masterResult.specialistBreakdown,
+        } as any,
       },
     });
 
     // 7. Enqueue 5:00 AM Email Digest via BullMQ Mail Queue
     if (sendEmail || process.env.AUTO_EMAIL_DAILY_SYNTHESIS === 'true') {
-      await this.sendSynthesisEmail(user.email, saved);
+      await this.sendSynthesisEmail(user.email, saved, masterResult);
     }
 
-    this.logger.log(`Daily Synthesis #${saved.id} generated successfully (Score: ${saved.cognitiveScore}/100)`);
+    this.logger.log(`Multi-Agent Synthesis #${saved.id} generated successfully (Cognitive Score: ${saved.cognitiveScore}/100)`);
 
     return {
       id: saved.id,
@@ -206,175 +278,10 @@ Thought Leadership (LinkedIn):
   }
 
   // ---------------------------------------------------------------------------
-  // Multi-Provider LLM Integration
-  // ---------------------------------------------------------------------------
-
-  private async callLLM(systemPrompt: string, userPrompt: string): Promise<any | null> {
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const nimKey = process.env.NIM_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
-    const openAiKey = process.env.OPENAI_API_KEY;
-
-    // 1. Try OpenRouter / NIM
-    if (openRouterKey || nimKey) {
-      const endpoint = openRouterKey
-        ? 'https://openrouter.ai/api/v1/chat/completions'
-        : 'https://integrate.api.nvidia.com/v1/chat/completions';
-      const key = openRouterKey || nimKey;
-      const model = openRouterKey
-        ? process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct'
-        : 'meta/llama-3.1-70b-instruct';
-
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${key}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-            temperature: 0.3,
-            response_format: { type: 'json_object' },
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          const content = json.choices?.[0]?.message?.content;
-          if (content) {
-            return JSON.parse(content);
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`OpenRouter/NIM LLM attempt error: ${err.message}`);
-      }
-    }
-
-    // 2. Try Gemini API
-    if (geminiKey) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-              generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
-            }),
-            signal: AbortSignal.timeout(15000),
-          },
-        );
-
-        if (res.ok) {
-          const json = await res.json();
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            return JSON.parse(text);
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Gemini LLM attempt error: ${err.message}`);
-      }
-    }
-
-    // 3. Try Groq
-    if (groqKey) {
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${groqKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-            response_format: { type: 'json_object' },
-            temperature: 0.3,
-          }),
-          signal: AbortSignal.timeout(12000),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          const content = json.choices?.[0]?.message?.content;
-          if (content) {
-            return JSON.parse(content);
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Groq LLM attempt error: ${err.message}`);
-      }
-    }
-
-    return null;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Deterministic Fallback Engine (High-Fidelity Algorithmic Synthesis)
-  // ---------------------------------------------------------------------------
-
-  private generateDeterministicSynthesis(
-    me: any,
-    snapshot: any,
-    activities: any[],
-    jobs: any[],
-    solved: any[],
-    posts: any[],
-  ) {
-    const actCount = activities.length;
-    const activeJobs = jobs.filter((j) => ['applied', 'interview'].includes(j.status)).length;
-    const interviews = jobs.filter((j) => j.status === 'interview').length;
-    const scheduledPosts = posts.filter((p) => p.status === 'scheduled').length;
-    const totalSolved = solved.length;
-
-    let score = 75;
-    if (actCount >= 3) score += 10;
-    if (activeJobs > 0) score += 5;
-    if (interviews > 0) score += 5;
-    if (scheduledPosts > 0) score += 5;
-    score = Math.min(95, Math.max(60, score));
-
-    return {
-      summary: `Cognitive synthesis indicates steady compounding momentum across core focus domains. Technical problem solving stands at ${totalSolved} verified solutions, with ${actCount} active engineering ledger entries executed over the last 24 hours. Career pipeline maintains ${activeJobs} active opportunities with ${interviews} interview stages in progress. Content publishing engine has ${scheduledPosts} thought leadership pieces staged.`,
-      highlights: [
-        `Maintained consistent execution with ${actCount} engineering activities logged.`,
-        `DSA repository verified at ${totalSolved} solved technical problems.`,
-        `Active career funnel maintains ${activeJobs} opportunities across top-tier targets.`,
-        scheduledPosts > 0
-          ? `Automated LinkedIn content engine has ${scheduledPosts} posts queued.`
-          : 'Content pipeline is primed for new technical insights.',
-      ],
-      actionItems: [
-        'Complete 1-2 Medium/Hard DSA problems in targeted topic areas (DP, Graphs, or Trees).',
-        'Review and advance active job application follow-ups and interview prep.',
-        'Finalize and schedule technical thought leadership post for weekly LinkedIn cadence.',
-        'Log daily engineering activities in the PULSE Activity Ledger to sustain consistency streak.',
-      ],
-      risksOrBlockers: [
-        actCount === 0 ? 'No activities logged in the past 24 hours — log your standup tasks.' : 'Ensure daily LeetCode momentum is sustained without rest day gaps.',
-        interviews === 0 ? 'No active interviews scheduled — accelerate target applications this week.' : 'Prepare mock interview behavioral and system design answers.',
-      ],
-      cognitiveScore: score,
-    };
-  }
-
-  // ---------------------------------------------------------------------------
   // 5:00 AM Email Digest Delivery
   // ---------------------------------------------------------------------------
 
-  private async sendSynthesisEmail(toEmail: string, synthesis: any) {
+  private async sendSynthesisEmail(toEmail: string, synthesis: any, masterResult?: MasterSynthesisReport) {
     const dateStr = new Date(synthesis.date).toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'short',
@@ -382,13 +289,17 @@ Thought Leadership (LinkedIn):
       year: 'numeric',
     });
 
-    const subject = `🧠 PULSE 5:00 AM Daily Synthesis · ${dateStr} (Score: ${synthesis.cognitiveScore}/100)`;
+    const forecast = masterResult?.futuristicForecast;
+    const correlations = masterResult?.crossDomainCorrelations || [];
+    const breakdown = masterResult?.specialistBreakdown;
+
+    const subject = `🧠 PULSE 5:00 AM Cognitive Synthesis & Forecast · ${dateStr} (Score: ${synthesis.cognitiveScore}/100)`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; background: #0c0f13; color: #edeae3; padding: 28px; border-radius: 8px; border: 1px solid #262c35;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #262c35; padding-bottom: 16px; margin-bottom: 20px;">
           <div>
-            <p style="margin: 0; font-size: 11px; font-family: monospace; color: #e8a33d; text-transform: uppercase; letter-spacing: 0.1em;">AUTONOMOUS BRAIN TELEMETRY</p>
-            <h2 style="margin: 4px 0 0; color: #edeae3; font-size: 20px;">Daily Cognitive Synthesis</h2>
+            <p style="margin: 0; font-size: 11px; font-family: monospace; color: #e8a33d; text-transform: uppercase; letter-spacing: 0.1em;">MULTI-AGENT HIERARCHICAL INTELLIGENCE</p>
+            <h2 style="margin: 4px 0 0; color: #edeae3; font-size: 20px;">Daily Cognitive Synthesis & Oracle</h2>
           </div>
           <div style="background: rgba(232, 163, 61, 0.12); border: 1px solid #e8a33d; border-radius: 6px; padding: 6px 14px; text-align: center;">
             <span style="font-size: 22px; font-weight: bold; color: #e8a33d; font-family: monospace;">${synthesis.cognitiveScore}</span>
@@ -398,11 +309,66 @@ Thought Leadership (LinkedIn):
 
         <p style="font-size: 13px; color: #8a8f98; margin: 0 0 16px;">${dateStr}</p>
 
+        <!-- Specialist Domain Gauge Cards -->
+        ${
+          breakdown
+            ? `
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px;">
+          <div style="background: #12161c; border: 1px solid #262c35; border-radius: 4px; padding: 8px; text-align: center;">
+            <div style="font-size: 16px; font-weight: bold; color: #e8a33d; font-family: monospace;">${breakdown.focusScore}</div>
+            <div style="font-size: 9px; color: #8a8f98; text-transform: uppercase;">Focus</div>
+          </div>
+          <div style="background: #12161c; border: 1px solid #262c35; border-radius: 4px; padding: 8px; text-align: center;">
+            <div style="font-size: 16px; font-weight: bold; color: #5fa8a0; font-family: monospace;">${breakdown.dsaScore}</div>
+            <div style="font-size: 9px; color: #8a8f98; text-transform: uppercase;">DSA</div>
+          </div>
+          <div style="background: #12161c; border: 1px solid #262c35; border-radius: 4px; padding: 8px; text-align: center;">
+            <div style="font-size: 16px; font-weight: bold; color: #98c379; font-family: monospace;">${breakdown.careerScore}</div>
+            <div style="font-size: 9px; color: #8a8f98; text-transform: uppercase;">Career</div>
+          </div>
+          <div style="background: #12161c; border: 1px solid #262c35; border-radius: 4px; padding: 8px; text-align: center;">
+            <div style="font-size: 16px; font-weight: bold; color: #61afef; font-family: monospace;">${breakdown.brandScore}</div>
+            <div style="font-size: 9px; color: #8a8f98; text-transform: uppercase;">Brand</div>
+          </div>
+        </div>`
+            : ''
+        }
+
         <!-- Executive Summary -->
         <div style="background: #12161c; border-left: 3px solid #e8a33d; padding: 16px; border-radius: 4px; margin-bottom: 20px; line-height: 1.6; font-size: 14px;">
           <strong style="color: #e8a33d; display: block; margin-bottom: 6px; font-size: 12px; font-family: monospace;">EXECUTIVE SUMMARY</strong>
           ${synthesis.summary}
         </div>
+
+        <!-- Futuristic Trajectory Forecasting -->
+        ${
+          forecast
+            ? `
+        <div style="background: #101720; border: 1px solid #3b82f6; border-radius: 6px; padding: 16px; margin-bottom: 20px;">
+          <h3 style="font-size: 13px; color: #60a5fa; font-family: monospace; margin: 0 0 10px; text-transform: uppercase;">🔮 FUTURISTIC TRAJECTORY & PREDICTIVE FORECAST</h3>
+          <p style="font-size: 13px; color: #d0d4dc; line-height: 1.5; margin: 0 0 8px;"><strong>30-Day Outlook:</strong> ${forecast.thirtyDayTrajectory}</p>
+          <p style="font-size: 13px; color: #d0d4dc; line-height: 1.5; margin: 0 0 12px;"><strong>90-Day Vision:</strong> ${forecast.ninetyDayTrajectory}</p>
+          ${
+            forecast.highLeverageDirective
+              ? `<div style="background: rgba(59, 130, 246, 0.15); padding: 8px 12px; border-radius: 4px; font-size: 12px; color: #93c5fd;"><strong>🎯 High-Leverage Directive:</strong> ${forecast.highLeverageDirective}</div>`
+              : ''
+          }
+        </div>`
+            : ''
+        }
+
+        <!-- Cross-Domain Correlations -->
+        ${
+          correlations.length > 0
+            ? `
+        <div style="margin-bottom: 20px; background: #131b1e; border: 1px solid #5fa8a0; border-radius: 6px; padding: 16px;">
+          <h3 style="font-size: 13px; color: #5fa8a0; font-family: monospace; margin: 0 0 10px;">⚡ CROSS-DOMAIN CORRELATIONS</h3>
+          <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #b8c4c7;">
+            ${correlations.map((c) => `<li style="margin-bottom: 6px;">${c}</li>`).join('')}
+          </ul>
+        </div>`
+            : ''
+        }
 
         <!-- Key Highlights -->
         <div style="margin-bottom: 20px;">
@@ -434,7 +400,7 @@ Thought Leadership (LinkedIn):
         }
 
         <div style="border-top: 1px solid #262c35; padding-top: 16px; margin-top: 24px; display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 11px; color: #606770; font-family: monospace;">PULSE Cognitive Control OS · 5:00 AM Dispatch</span>
+          <span style="font-size: 11px; color: #606770; font-family: monospace;">PULSE Multi-Agent Cognitive Engine · 5:00 AM Dispatch</span>
           <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/brain" style="color: #e8a33d; font-size: 12px; text-decoration: none; font-weight: bold;">Open Autonomous Brain →</a>
         </div>
       </div>
@@ -457,13 +423,12 @@ Thought Leadership (LinkedIn):
   // ---------------------------------------------------------------------------
 
   async getLatestSynthesis(userId: number) {
-    let latest = await this.prisma.dailySynthesis.findFirst({
+    const latest = await this.prisma.dailySynthesis.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
     if (!latest) {
-      // Auto-generate initial synthesis if none exists
       return this.generateDailySynthesis(userId, false);
     }
 
