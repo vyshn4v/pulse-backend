@@ -126,18 +126,31 @@ export class BrainService implements OnModuleInit {
       this.brandSpecialist.analyze(persona, recentPosts),
     ]);
 
+    // Check if all specialists failed
+    const failures: string[] = [];
+    if (focusSettled.status === 'rejected') failures.push(`Focus Specialist: ${focusSettled.reason?.message || focusSettled.reason}`);
+    if (dsaSettled.status === 'rejected') failures.push(`DSA Specialist: ${dsaSettled.reason?.message || dsaSettled.reason}`);
+    if (careerSettled.status === 'rejected') failures.push(`Career Specialist: ${careerSettled.reason?.message || careerSettled.reason}`);
+    if (brandSettled.status === 'rejected') failures.push(`Brand Specialist: ${brandSettled.reason?.message || brandSettled.reason}`);
+
+    if (failures.length === 4) {
+      const allFailMsg = `AI Synthesis Failed: All 4 domain specialist agents failed. Errors:\n${failures.join('\n')}`;
+      this.logger.error(allFailMsg);
+      throw new NotFoundException(allFailMsg);
+    }
+
     const focusReport: FocusSpecialistReport =
       focusSettled.status === 'fulfilled'
         ? focusSettled.value
         : {
             domain: 'focus_and_productivity',
-            velocityScore: 70,
-            flowStateRating: 'Optimal',
+            velocityScore: 0,
+            flowStateRating: 'Stalled',
             completedTasksCount: recentActivities.filter((a) => a.status === 'done').length,
-            blockedTasksCount: 0,
-            topDistractionsOrFrictions: [],
-            keyWins: recentActivities.slice(0, 3).map((a) => a.title),
-            domainRecommendation: 'Continue high execution focus.',
+            blockedTasksCount: recentActivities.filter((a) => ['hold', 'rejected'].includes(a.status)).length,
+            topDistractionsOrFrictions: [`Specialist Analysis Unavailable: ${focusSettled.reason?.message || 'Failed'}`],
+            keyWins: [],
+            domainRecommendation: 'Focus specialist analysis failed to generate.',
           };
 
     const dsaReport: DsaSpecialistReport =
@@ -145,19 +158,19 @@ export class BrainService implements OnModuleInit {
         ? dsaSettled.value
         : {
             domain: 'dsa_and_algorithms',
-            masteryScore: 75,
+            masteryScore: 0,
             weeklySolvedCount: recentSolved.length,
             totalSolvedCount: solvedProblems.length,
-            strongTopics: ['Arrays', 'Strings'],
-            blindspotsOrNeglectedTopics: ['Graph', 'Tree'],
-            interviewReadinessLevel: 'Senior',
+            strongTopics: [],
+            blindspotsOrNeglectedTopics: [],
+            interviewReadinessLevel: 'Junior',
             suggestedProblemToday: {
-              title: 'Target Topic Problem',
-              topic: 'Graph / Tree',
+              title: 'Problem Recommendation Unavailable',
+              topic: 'N/A',
               difficulty: 'Medium',
-              reason: 'Balancing algorithmic distribution.',
+              reason: 'DSA specialist analysis failed to generate.',
             },
-            domainRecommendation: 'Solve 1 Medium problem today.',
+            domainRecommendation: 'DSA specialist analysis failed to generate.',
           };
 
     const careerReport: CareerSpecialistReport =
@@ -165,13 +178,13 @@ export class BrainService implements OnModuleInit {
         ? careerSettled.value
         : {
             domain: 'career_and_pipeline',
-            pipelineHealthScore: 75,
+            pipelineHealthScore: 0,
             activeApplicationsCount: recentJobs.filter((j) => ['applied', 'interview'].includes(j.status)).length,
             interviewStageCount: recentJobs.filter((j) => j.status === 'interview').length,
             stalledApplicationsCount: 0,
             urgentFollowUps: [],
-            interviewPrepFocus: 'Review system design architectures and technical concepts.',
-            domainRecommendation: 'Maintain steady application outreach.',
+            interviewPrepFocus: 'Career specialist analysis failed to generate.',
+            domainRecommendation: 'Career specialist analysis failed to generate.',
           };
 
     const brandReport: BrandSpecialistReport =
@@ -179,13 +192,13 @@ export class BrainService implements OnModuleInit {
         ? brandSettled.value
         : {
             domain: 'brand_and_thought_leadership',
-            brandMomentumScore: 70,
+            brandMomentumScore: 0,
             publishedCount: recentPosts.filter((p) => p.status === 'published').length,
             scheduledQueueCount: recentPosts.filter((p) => p.status === 'scheduled').length,
             totalImpressions: recentPosts.reduce((acc, p) => acc + (p.impressions || 0), 0),
-            topPerformingTopics: ['#SoftwareEngineering'],
-            nextPostDraftPrompt: 'Share insights on distributed systems design.',
-            domainRecommendation: 'Keep active presence on LinkedIn.',
+            topPerformingTopics: [],
+            nextPostDraftPrompt: 'Brand specialist analysis failed to generate.',
+            domainRecommendation: 'Brand specialist analysis failed to generate.',
           };
 
     const aggregatedReports: AggregatedSpecialistReports = {

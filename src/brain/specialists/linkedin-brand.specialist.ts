@@ -58,35 +58,6 @@ ${
 }
 `;
 
-    return this.llm.callFastSpecialist<BrandSpecialistReport>(systemPrompt, userPrompt, () =>
-      this.deterministicFallback(published, scheduled, drafts, totalImpressions, topTopics),
-    );
-  }
-
-  private deterministicFallback(
-    published: any[],
-    scheduled: any[],
-    drafts: any[],
-    totalImpressions: number,
-    topTopics: string[],
-  ): BrandSpecialistReport {
-    const score = Math.min(
-      100,
-      Math.max(20, published.length * 10 + scheduled.length * 15 + Math.min(40, Math.floor(totalImpressions / 100))),
-    );
-
-    return {
-      domain: 'brand_and_thought_leadership',
-      brandMomentumScore: score,
-      publishedCount: published.length,
-      scheduledQueueCount: scheduled.length,
-      totalImpressions,
-      topPerformingTopics: topTopics.length > 0 ? topTopics : ['#SoftwareEngineering', '#BackendDevelopment'],
-      nextPostDraftPrompt: 'Share insights on optimizing background queue concurrency and resilience.',
-      domainRecommendation:
-        scheduled.length === 0
-          ? 'Content queue is empty. Schedule 1 post for this week to maintain developer presence.'
-          : 'Content pipeline is primed. Review upcoming post drafts.',
-    };
+    return this.llm.callFastSpecialist<BrandSpecialistReport>(systemPrompt, userPrompt, 'LinkedInBrandSpecialist');
   }
 }

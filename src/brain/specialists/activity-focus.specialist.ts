@@ -49,25 +49,6 @@ Top Applications: ${screenTimeSummary.topApps.map((a) => `${a.appName} (${(a.dur
 }
 `;
 
-    return this.llm.callFastSpecialist<FocusSpecialistReport>(systemPrompt, userPrompt, () =>
-      this.deterministicFallback(recent24hActivities, doneTasks, blockedTasks),
-    );
-  }
-
-  private deterministicFallback(all24h: any[], done: any[], blocked: any[]): FocusSpecialistReport {
-    const score = Math.min(100, Math.max(30, done.length * 25 - blocked.length * 15 + (all24h.length > 0 ? 30 : 0)));
-    return {
-      domain: 'focus_and_productivity',
-      velocityScore: score,
-      flowStateRating: score >= 75 ? 'Deep Focus' : score >= 50 ? 'Optimal' : blocked.length > 0 ? 'Fragmented' : 'Stalled',
-      completedTasksCount: done.length,
-      blockedTasksCount: blocked.length,
-      topDistractionsOrFrictions: blocked.map((b) => `${b.title}: ${b.reason || 'Blocked'}`).slice(0, 3),
-      keyWins: done.map((d) => d.title).slice(0, 4),
-      domainRecommendation:
-        blocked.length > 0
-          ? `Resolve pending blocker on "${blocked[0].title}" as your first action today.`
-          : 'Maintain your current high-velocity momentum and tackle highest-complexity backlog tasks.',
-    };
+    return this.llm.callFastSpecialist<FocusSpecialistReport>(systemPrompt, userPrompt, 'ActivityFocusSpecialist');
   }
 }

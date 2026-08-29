@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
 
 @Injectable()
 export class LlmProviderService {
@@ -7,12 +7,15 @@ export class LlmProviderService {
   /**
    * Dispatch a Fast Tier-1 Specialist LLM Call
    * Prioritizes low-latency models (Groq Llama 3.3, Gemini Flash, OpenRouter)
+   * Throws an error if all providers fail (No hardcoded fake fallbacks).
    */
-  async callFastSpecialist<T>(systemPrompt: string, userPrompt: string, fallbackGenerator: () => T): Promise<T> {
+  async callFastSpecialist<T>(systemPrompt: string, userPrompt: string, specialistName: string = 'Specialist'): Promise<T> {
     const groqKey = process.env.GROQ_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
     const openAiKey = process.env.OPENAI_API_KEY;
+
+    const errors: string[] = [];
 
     // 1. Try Groq (Ultra-low latency for micro-specialists)
     if (groqKey) {
@@ -32,17 +35,24 @@ export class LlmProviderService {
             response_format: { type: 'json_object' },
             temperature: 0.2,
           }),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(12000),
         });
 
         if (res.ok) {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('Groq returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`Groq HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`Groq specialist call failed: ${err.message}`);
+        errors.push(`Groq exception: ${err.message}`);
+        this.logger.warn(`[${specialistName}] Groq attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('GROQ_API_KEY not configured');
     }
 
     // 2. Try Gemini Flash
@@ -57,7 +67,7 @@ export class LlmProviderService {
               contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
               generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
             }),
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(12000),
           },
         );
 
@@ -65,10 +75,17 @@ export class LlmProviderService {
           const json = await res.json();
           const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) return JSON.parse(text) as T;
+          errors.push('Gemini returned empty response candidate');
+        } else {
+          const errText = await res.text();
+          errors.push(`Gemini HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`Gemini specialist call failed: ${err.message}`);
+        errors.push(`Gemini exception: ${err.message}`);
+        this.logger.warn(`[${specialistName}] Gemini Flash attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('GEMINI_API_KEY/GOOGLE_API_KEY not configured');
     }
 
     // 3. Try OpenRouter
@@ -89,17 +106,24 @@ export class LlmProviderService {
             response_format: { type: 'json_object' },
             temperature: 0.2,
           }),
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(14000),
         });
 
         if (res.ok) {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('OpenRouter returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`OpenRouter HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`OpenRouter specialist call failed: ${err.message}`);
+        errors.push(`OpenRouter exception: ${err.message}`);
+        this.logger.warn(`[${specialistName}] OpenRouter attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('OPENROUTER_API_KEY not configured');
     }
 
     // 4. Try OpenAI
@@ -120,35 +144,47 @@ export class LlmProviderService {
             response_format: { type: 'json_object' },
             temperature: 0.2,
           }),
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(14000),
         });
 
         if (res.ok) {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('OpenAI returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`OpenAI HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`OpenAI specialist call failed: ${err.message}`);
+        errors.push(`OpenAI exception: ${err.message}`);
+        this.logger.warn(`[${specialistName}] OpenAI attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('OPENAI_API_KEY not configured');
     }
 
-    // Fallback to deterministic algorithmic generator
-    return fallbackGenerator();
+    // If all providers fail, do not return fake mock data - throw explicit failure
+    const errorMsg = `[${specialistName}] AI generation failed. All providers unsuccessful. Details: ${errors.join(' | ')}`;
+    this.logger.error(errorMsg);
+    throw new BadGatewayException(errorMsg);
   }
 
   /**
-   * Dispatch Tier-2 Master Oracle LLM Call (Prioritizes Google Gemini for deep reasoning and futuristic forecasting)
+   * Dispatch Tier-2 Master Oracle LLM Call
+   * Prioritizes Google Gemini for deep reasoning and futuristic forecasting.
+   * Throws an error if all providers fail (No hardcoded fake fallbacks).
    */
-  async callMasterOracle<T>(systemPrompt: string, userPrompt: string, fallbackGenerator: () => T): Promise<T> {
+  async callMasterOracle<T>(systemPrompt: string, userPrompt: string): Promise<T> {
     const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
     const openAiKey = process.env.OPENAI_API_KEY;
 
-    // 1. Primary: Google Gemini 1.5 Pro / Flash (Best for cross-domain synthesis & long-horizon forecasting)
+    const errors: string[] = [];
+
+    // 1. Primary: Google Gemini (1.5 Pro / Flash)
     if (geminiKey) {
-      // Try gemini-1.5-pro first for highest cognitive depth, fallback to gemini-1.5-flash
       const models = ['gemini-1.5-pro', 'gemini-1.5-flash'];
       for (const model of models) {
         try {
@@ -169,11 +205,18 @@ export class LlmProviderService {
             const json = await res.json();
             const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) return JSON.parse(text) as T;
+            errors.push(`Gemini (${model}) returned empty text candidate`);
+          } else {
+            const errText = await res.text();
+            errors.push(`Gemini (${model}) HTTP ${res.status}: ${errText}`);
           }
         } catch (err: any) {
+          errors.push(`Gemini (${model}) exception: ${err.message}`);
           this.logger.warn(`Gemini (${model}) master oracle attempt failed: ${err.message}`);
         }
       }
+    } else {
+      errors.push('GEMINI_API_KEY/GOOGLE_API_KEY not configured');
     }
 
     // 2. Secondary: OpenRouter
@@ -201,10 +244,17 @@ export class LlmProviderService {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('OpenRouter returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`OpenRouter HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`OpenRouter master oracle call failed: ${err.message}`);
+        errors.push(`OpenRouter exception: ${err.message}`);
+        this.logger.warn(`OpenRouter master oracle attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('OPENROUTER_API_KEY not configured');
     }
 
     // 3. Tertiary: Groq
@@ -232,10 +282,17 @@ export class LlmProviderService {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('Groq returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`Groq HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`Groq master oracle call failed: ${err.message}`);
+        errors.push(`Groq exception: ${err.message}`);
+        this.logger.warn(`Groq master oracle attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('GROQ_API_KEY not configured');
     }
 
     // 4. OpenAI
@@ -263,12 +320,22 @@ export class LlmProviderService {
           const json = await res.json();
           const content = json.choices?.[0]?.message?.content;
           if (content) return JSON.parse(content) as T;
+          errors.push('OpenAI returned empty response content');
+        } else {
+          const errText = await res.text();
+          errors.push(`OpenAI HTTP ${res.status}: ${errText}`);
         }
       } catch (err: any) {
-        this.logger.warn(`OpenAI master oracle call failed: ${err.message}`);
+        errors.push(`OpenAI exception: ${err.message}`);
+        this.logger.warn(`OpenAI master oracle attempt failed: ${err.message}`);
       }
+    } else {
+      errors.push('OPENAI_API_KEY not configured');
     }
 
-    return fallbackGenerator();
+    // Explicit error - No fake hardcoded synthesis
+    const errorMsg = `Master Oracle synthesis failed. All AI providers unsuccessful. Details: ${errors.join(' | ')}`;
+    this.logger.error(errorMsg);
+    throw new BadGatewayException(errorMsg);
   }
 }

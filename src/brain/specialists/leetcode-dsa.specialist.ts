@@ -63,46 +63,6 @@ ${
 }
 `;
 
-    return this.llm.callFastSpecialist<DsaSpecialistReport>(systemPrompt, userPrompt, () =>
-      this.deterministicFallback(solvedProblems, weekSolved, strongTopics, neglectedTopics),
-    );
-  }
-
-  private deterministicFallback(
-    allSolved: any[],
-    weekSolved: any[],
-    strongTopics: string[],
-    neglectedTopics: string[],
-  ): DsaSpecialistReport {
-    const medCount = allSolved.filter((p) => p.difficulty === 'Medium').length;
-    const hardCount = allSolved.filter((p) => p.difficulty === 'Hard').length;
-    const score = Math.min(100, Math.max(20, weekSolved.length * 15 + medCount * 2 + hardCount * 4));
-
-    return {
-      domain: 'dsa_and_algorithms',
-      masteryScore: score,
-      weeklySolvedCount: weekSolved.length,
-      totalSolvedCount: allSolved.length,
-      strongTopics: strongTopics.length > 0 ? strongTopics : ['Arrays', 'Strings'],
-      blindspotsOrNeglectedTopics: neglectedTopics.slice(0, 3),
-      interviewReadinessLevel:
-        hardCount >= 10 && medCount >= 50
-          ? 'Staff-Target'
-          : medCount >= 30
-          ? 'Senior'
-          : medCount >= 10
-          ? 'Mid-Level'
-          : 'Junior',
-      suggestedProblemToday: {
-        title: neglectedTopics.length > 0 ? `Target ${neglectedTopics[0]} Problem` : 'Course Schedule II',
-        topic: neglectedTopics.length > 0 ? neglectedTopics[0] : 'Graph Topological Sort',
-        difficulty: 'Medium',
-        reason: 'Recommended based on algorithmic distribution balance.',
-      },
-      domainRecommendation:
-        weekSolved.length >= 3
-          ? 'Great weekly momentum. Maintain streak by solving 1 Medium problem today.'
-          : 'Reignite problem-solving rhythm by completing 1 target problem in your focus domain today.',
-    };
+    return this.llm.callFastSpecialist<DsaSpecialistReport>(systemPrompt, userPrompt, 'LeetCodeDsaSpecialist');
   }
 }
