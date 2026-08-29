@@ -355,149 +355,49 @@ ${sources.map((s) => `- [${s.type.toUpperCase()}] ${s.title}: ${s.snippet}`).joi
     sources: AiSourceCitation[],
     preferredModel?: string,
   ): Promise<{ answer: string; modelUsed: string }> {
-    const groqKey = process.env.GROQ_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    const openAiKey = process.env.OPENAI_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const nimKey = process.env.NIM_API_KEY;
 
-    // Helper: Execute a single fetch with retry
-    const fetchWithRetry = async (
-      name: string,
-      url: string,
-      options: RequestInit,
-      retries: number = 1,
-      timeoutMs: number = 9000,
-    ): Promise<Response | null> => {
-      for (let attempt = 1; attempt <= retries + 1; attempt++) {
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), timeoutMs);
-          const res = await fetch(url, { ...options, signal: controller.signal });
-          clearTimeout(timer);
-          if (res.ok) return res;
-          this.logger.warn(`[${name}] HTTP status ${res.status} on attempt ${attempt}`);
-        } catch (err: any) {
-          this.logger.warn(`[${name}] Attempt ${attempt} failed (${err.name === 'AbortError' ? 'timeout' : err.message})`);
-          if (attempt <= retries) {
-            await new Promise((r) => setTimeout(r, 600));
-          }
-        }
-      }
-      return null;
-    };
-
-    // 1. High-Speed Provider: Groq (Llama 3.3 70B ~300ms)
-    if (groqKey && (preferredModel === 'auto' || preferredModel === 'groq-llama' || !preferredModel)) {
-      const res = await fetchWithRetry(
-        'Groq',
-        'https://api.groq.com/openai/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-            temperature: 0.4,
-          }),
-        },
-        1,
-        8000,
-      );
-
-      if (res) {
-        const json = await res.json();
-        const content = json.choices?.[0]?.message?.content;
-        if (content) return { answer: content, modelUsed: 'groq/llama-3.3-70b-versatile' };
-      }
+    if (!openRouterKey) {
+      throw new Error('OPENROUTER_API_KEY is not configured in backend/.env');
     }
 
-    // 2. High-Speed Provider: Gemini 1.5 Flash (~500ms)
-    if (geminiKey && (preferredModel === 'auto' || preferredModel === 'gemini-1.5-flash' || !preferredModel)) {
-      const res = await fetchWithRetry(
-        'Gemini',
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-        {
+    const models = [
+      preferredModel && preferredModel !== 'auto' ? preferredModel : 'google/gemini-2.0-flash-001',
+      'google/gemini-flash-1.5',
+      'meta-llama/llama-3.3-70b-instruct',
+    ];
+
+    for (const model of models) {
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-            generationConfig: { temperature: 0.4 },
-          }),
-        },
-        1,
-        8000,
-      );
-
-      if (res) {
-        const json = await res.json();
-        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) return { answer: text, modelUsed: 'gemini-1.5-flash' };
-      }
-    }
-
-    // 3. High-Speed Provider: OpenAI GPT-4o-mini (~600ms)
-    if (openAiKey && (preferredModel === 'auto' || preferredModel === 'gpt-4o-mini' || !preferredModel)) {
-      const res = await fetchWithRetry(
-        'OpenAI',
-        'https://api.openai.com/v1/chat/completions',
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-            temperature: 0.5,
-          }),
-        },
-        1,
-        8000,
-      );
-
-      if (res) {
-        const json = await res.json();
-        const content = json.choices?.[0]?.message?.content;
-        if (content) return { answer: content, modelUsed: 'openai/gpt-4o-mini' };
-      }
-    }
-
-    // 4. Provider: OpenRouter / NVIDIA NIM (with 1 retry)
-    if (openRouterKey || nimKey) {
-      const endpoint = openRouterKey
-        ? 'https://openrouter.ai/api/v1/chat/completions'
-        : 'https://integrate.api.nvidia.com/v1/chat/completions';
-      const key = openRouterKey || nimKey;
-      const model = openRouterKey
-        ? process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct'
-        : 'meta/llama-3.1-70b-instruct';
-
-      const res = await fetchWithRetry(
-        'OpenRouter/NIM',
-        endpoint,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          headers: {
+            Authorization: `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://pulse.vyshnavpc.com',
+            'X-Title': 'PULSE Autonomous AI Query',
+          },
           body: JSON.stringify({
             model,
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
             temperature: 0.4,
           }),
-        },
-        1,
-        10000,
-      );
+          signal: AbortSignal.timeout(15000),
+        });
 
-      if (res) {
-        const json = await res.json();
-        const content = json.choices?.[0]?.message?.content;
-        if (content) return { answer: content, modelUsed: model };
+        if (res.ok) {
+          const json = await res.json();
+          const content = json.choices?.[0]?.message?.content;
+          if (content) return { answer: content, modelUsed: model };
+        }
+      } catch (err: any) {
+        this.logger.warn(`OpenRouter (${model}) attempt failed: ${err.message}`);
       }
     }
 
-    // 5. If all external providers timed out or failed
-    this.logger.warn('All external LLM endpoints timed out or failed.');
+    this.logger.warn('All OpenRouter models timed out or failed.');
     return {
-      answer: `⏱️ **AI Model Request Timed Out**\n\nThe LLM service took too long to respond. Please click the **🔄 Retry** button above or switch to a faster model (e.g. **Groq Llama 3.3** or **Gemini 1.5 Flash**).`,
+      answer: `⏱️ **AI Model Request Timed Out**\n\nThe OpenRouter service took too long to respond. Please click the **🔄 Retry** button above.`,
       modelUsed: 'timeout',
     };
   }
@@ -508,99 +408,28 @@ ${sources.map((s) => `- [${s.type.toUpperCase()}] ${s.title}: ${s.snippet}`).joi
     preferredModel: string | undefined,
     onToken: (token: string) => void,
   ): Promise<{ modelUsed: string }> {
-    const groqKey = process.env.GROQ_API_KEY;
-    const openAiKey = process.env.OPENAI_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     const openRouterKey = process.env.OPENROUTER_API_KEY;
-    const nimKey = process.env.NIM_API_KEY;
 
-    // 1. Try Groq Streaming (~300ms first token)
-    if (groqKey && (preferredModel === 'auto' || preferredModel === 'groq-llama' || !preferredModel)) {
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-            temperature: 0.4,
-            stream: true,
-          }),
-          signal: AbortSignal.timeout(12000),
-        });
-
-        if (res.ok && res.body) {
-          await this.consumeSseStream(res.body, onToken);
-          return { modelUsed: 'groq/llama-3.3-70b-versatile' };
-        }
-      } catch (err: any) {
-        this.logger.warn(`Groq stream fallback: ${err.message}`);
-      }
+    if (!openRouterKey) {
+      throw new Error('OPENROUTER_API_KEY is not configured in backend/.env');
     }
 
-    // 2. Try OpenAI Streaming
-    if (openAiKey && (preferredModel === 'auto' || preferredModel === 'gpt-4o-mini' || !preferredModel)) {
+    const models = [
+      preferredModel && preferredModel !== 'auto' ? preferredModel : 'google/gemini-2.0-flash-001',
+      'google/gemini-flash-1.5',
+      'meta-llama/llama-3.3-70b-instruct',
+    ];
+
+    for (const model of models) {
       try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-            temperature: 0.5,
-            stream: true,
-          }),
-          signal: AbortSignal.timeout(12000),
-        });
-
-        if (res.ok && res.body) {
-          await this.consumeSseStream(res.body, onToken);
-          return { modelUsed: 'openai/gpt-4o-mini' };
-        }
-      } catch (err: any) {
-        this.logger.warn(`OpenAI stream fallback: ${err.message}`);
-      }
-    }
-
-    // 3. Try Gemini Streaming
-    if (geminiKey && (preferredModel === 'auto' || preferredModel === 'gemini-1.5-flash' || !preferredModel)) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key=${geminiKey}&alt=sse`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-              generationConfig: { temperature: 0.4 },
-            }),
-            signal: AbortSignal.timeout(12000),
+          headers: {
+            Authorization: `Bearer ${openRouterKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://pulse.vyshnavpc.com',
+            'X-Title': 'PULSE Autonomous AI Query Stream',
           },
-        );
-
-        if (res.ok && res.body) {
-          await this.consumeGeminiSseStream(res.body, onToken);
-          return { modelUsed: 'gemini-1.5-flash' };
-        }
-      } catch (err: any) {
-        this.logger.warn(`Gemini stream fallback: ${err.message}`);
-      }
-    }
-
-    // 4. Try OpenRouter / NIM Streaming
-    if (openRouterKey || nimKey) {
-      const endpoint = openRouterKey
-        ? 'https://openrouter.ai/api/v1/chat/completions'
-        : 'https://integrate.api.nvidia.com/v1/chat/completions';
-      const key = openRouterKey || nimKey;
-      const model = openRouterKey
-        ? process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct'
-        : 'meta/llama-3.1-70b-instruct';
-
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
@@ -615,11 +444,11 @@ ${sources.map((s) => `- [${s.type.toUpperCase()}] ${s.title}: ${s.snippet}`).joi
           return { modelUsed: model };
         }
       } catch (err: any) {
-        this.logger.warn(`OpenRouter stream fallback: ${err.message}`);
+        this.logger.warn(`OpenRouter stream (${model}) fallback: ${err.message}`);
       }
     }
 
-    throw new Error('All streaming providers timed out');
+    throw new Error('All OpenRouter streaming models timed out');
   }
 
   private async consumeSseStream(body: any, onDelta: (delta: string) => void): Promise<void> {
@@ -640,31 +469,6 @@ ${sources.map((s) => `- [${s.type.toUpperCase()}] ${s.title}: ${s.snippet}`).joi
               const json = JSON.parse(trimmed.slice(6));
               const delta = json.choices?.[0]?.delta?.content;
               if (delta) onDelta(delta);
-            } catch {}
-          }
-        }
-      }
-    }
-  }
-
-  private async consumeGeminiSseStream(body: any, onDelta: (delta: string) => void): Promise<void> {
-    const reader = body.getReader ? body.getReader() : null;
-    if (reader) {
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data: ')) {
-            try {
-              const json = JSON.parse(trimmed.slice(6));
-              const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) onDelta(text);
             } catch {}
           }
         }
